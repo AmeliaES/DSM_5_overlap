@@ -9,6 +9,8 @@ library(stringr)
 library(igraph)
 library(ggraph)
 library(tidyr)
+devtools::install_github("garthtarr/edgebundleR")
+library(edgebundleR)
 
 # --------------------------------
 # Load in data
@@ -76,8 +78,6 @@ connect <- graph_data %>%
   drop_na() 
 head(connect)
 
-connectFilt <- connect %>%
-  filter(from == 5)
 
 # ---------------
 ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
@@ -100,5 +100,10 @@ graph_data %>%
 
 graph_data %>%
   filter(symptom_id_count == 1)
+
+# --------------------------------
+edgebundle(mygraph)
+
+
 
 
