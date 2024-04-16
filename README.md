@@ -1,6 +1,6 @@
 # Overlap of symptoms in DSM-5, restricted to Schizophrenia Spectrum and Other Psychotic Disorders (Chapter 2), Bipolar and Related Disorders (Chapter 3) and Depressive Disorders (Chapter 4)
 
-* Using data from supplementary of Forbes et al. (2024) I created a similar figure but restricted to Schizophrenia Spectrum and Other Psychotic Disorders (Chapter 2), Bipolar and Related Disorders (Chapter 3) and Depressive Disorders (Chapter 4).
+* Using data from supplementary of [Forbes et al. (2024)](https://doi.org/10.1017/S0033291723002544) I created a similar figure but restricted to Schizophrenia Spectrum and Other Psychotic Disorders (Chapter 2), Bipolar and Related Disorders (Chapter 3) and Depressive Disorders (Chapter 4).
 
 * Data was obtained from https://osf.io/w3kcn
 
