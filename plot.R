@@ -9,101 +9,157 @@ library(stringr)
 library(igraph)
 library(ggraph)
 library(tidyr)
-devtools::install_github("garthtarr/edgebundleR")
-library(edgebundleR)
-
+library(tidygraph)
+set.seed(1)
 # --------------------------------
 # Load in data
 data <- read.csv("data/Forbes_supp.csv")
 
 # Filter to chapters 2,3,4 (ie. chapters for SCZ, BD, MDD)
 graph_data <- data %>%
-  dplyr::filter(str_detect(DSM.5.Chapter, "Ch2\ ")) %>%
-  # dplyr::filter(str_detect(DSM.5.Chapter, "Ch2\ |Ch3\ |Ch4\ ")) %>%
-  dplyr::select(DSM_Chapter = DSM.5.Chapter,
-                "Symptom_ID" = Unique.symptom.number..index.for.duplicate.symptoms..sort.by.this.column.to.see.the.groups.of.symptoms.that.have.been.coded.as.redundant.) %>%
-  dplyr::mutate(Symptom_ID = as.character(Symptom_ID)) %>%
+  dplyr::filter(str_detect(DSM.5.Chapter, "Ch2\ |Ch3\ |Ch4\ ")) %>%
+   dplyr::select(DSM_Chapter = DSM.5.Chapter,
+                Disorder = DSM.5.Disorder,
+                "Symptom_ID" = Unique.symptom.number..index.for.duplicate.symptoms..sort.by.this.column.to.see.the.groups.of.symptoms.that.have.been.coded.as.redundant.,
+                "Description" = Constituent.symptom..wording.from.DSM.5.) %>%
+  add_count(Symptom_ID)
+
+
+# ------------------------------------------
+# Create an empty adjacency matrix
+adj_matrix <- matrix(0, nrow = nrow(graph_data), ncol = nrow(graph_data))
+
+# Find IDs for symptoms that overlap
+IDs3 <- graph_data %>%
   group_by(Symptom_ID) %>%
-  add_count(name = "symptom_id_count") %>%
-  ungroup() %>%
-  dplyr::mutate(Unique_ID = 1:nrow(.)) 
+  summarise(n_groups = n_distinct(DSM_Chapter)) %>%
+  filter(n_groups == 3) %>%
+  pull(Symptom_ID) %>%
+  unique()
 
-head(graph_data)
+IDs2 <- graph_data %>%
+  group_by(Symptom_ID) %>%
+  summarise(n_groups = n_distinct(DSM_Chapter)) %>%
+  filter(n_groups == 2) %>%
+  pull(Symptom_ID) %>%
+  unique()
 
-# ---------------
-# Create hierarchical network dataframe:
+for (i in 1:nrow(graph_data)){
+  if(graph_data$Symptom_ID[i] %in% IDs3){
+    adj_matrix[i,] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 20, 0)
+    adj_matrix[,i] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 20, 0)
+  }else if(graph_data$Symptom_ID[i] %in% IDs2){
+    adj_matrix[i,] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 10, 0)
+    adj_matrix[,i] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 10, 0)
+  }else{
+    adj_matrix[i,] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 1, 0)
+    adj_matrix[,i] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 1, 0)
+  }
+}
 
-# Origin on top, then DSM-5 chapters, then symptoms
-d1 <- data.frame(from="origin", to=unique(graph_data$DSM_Chapter))
-d2 <- graph_data %>%
-  dplyr::select(from = DSM_Chapter, to = Unique_ID)
-hierarchy <- as.data.frame(rbind(d1, d2))
-head(hierarchy)
+for (i in 1:nrow(graph_data)){
+    adj_matrix[i,] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, graph_data$n[i], 0)
+    adj_matrix[,i] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, graph_data$n[i], 0)
+}
 
-# create a vertices data.frame. One line per object of our hierarchy, giving features of nodes.
-vertices <- data.frame(name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))) ) 
 
-# Let's add a column with the group of each name. It will be useful later to color points
-vertices$group  <-  hierarchy$from[ match( vertices$name, hierarchy$to ) ]
-vertices$value <- as.character(c(rep(1,4), graph_data$symptom_id_count))
-vertices$value <- as.character(c(rep(1,2), graph_data$symptom_id_count))
-
-# ---------------
-# Create a graph object with the igraph library
-mygraph <- graph_from_data_frame( hierarchy, vertices=vertices )
-# This is a network object, you visualize it as a network like shown in the network section!
-
-ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
-  geom_edge_diagonal() +
-  theme_void()
-
-# ---------------
-# Create connections for overlapping symptoms
-# Where Unique_ID equals i, then a new "to" column should be the variable "to":
-to <- sapply(1:nrow(graph_data), function(i){
-  row <- graph_data[graph_data$Unique_ID == i,]
-  symID <- row$Symptom_ID
-  to <- graph_data[graph_data$Symptom_ID == symID & graph_data$Unique_ID > i,][1,]$Unique_ID
-  to
+# Check it keeps nodes with 0 edges
+sapply(1:nrow(adj_matrix), function(i){
+  sum(adj_matrix[i,]) == 0
 })
 
-graph_data$to <- to
+# Convert to a tidy graph object
+graph <- as_tbl_graph(adj_matrix, directed = FALSE) %>%
+  mutate(DSM5_Chapter = factor(graph_data$DSM_Chapter)) %>%
+  mutate(Disorder = factor(graph_data$Disorder)) %>%
+  mutate(Symptom_ID = graph_data$Symptom_ID) %>%
+  mutate(overlap = ifelse(Symptom_ID %in% IDs, TRUE, FALSE)) 
 
-# ---------------
-# Create connections dataframe:
-connect <- graph_data %>%
-  dplyr::select(from = Unique_ID, to) %>%
-  mutate(from = as.character(from),
-         to = as.character(to))  %>%
-  drop_na() 
-head(connect)
+unique(graph_data$DSM_Chapter)
+max(graph_data$n)
+
+png("plots/chapters.png", height = 3000, width = 3000, res = 500)
+ggraph(graph, layout = 'linear', circular = TRUE) + 
+  geom_edge_arc(aes(colour = weight), alpha = 0.3, show.legend = F) + # 
+  geom_node_point(size = 2, aes(color = DSM5_Chapter)) +
+  theme_graph() +
+  scale_edge_color_gradientn(colours = c('#756f72',  '#dbb75a', '#ab356a')) +
+  scale_color_manual(values = c("Ch2 - Schizophrenia Spectrum and Other Psychotic Disorders" = "#c6a9cc",
+                                "Ch3 - Bipolar and Related Disorders" = "#cee8a9",
+                                "Ch4 - Depressive Disorders" = "#8ebfe8")) +
+  guides(color="none")
+dev.off()
 
 
-# ---------------
-ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
-  geom_conn_bundle(data = get_con(from = connect$from, to = connect$to), alpha=0.7, colour="grey", tension = 1) + 
-  geom_node_point(aes(filter = leaf, x = x*1.05, y=y*1.05, colour=group, size=value, alpha=0.2)) +
-  # scale_color_manual(values = c("Ch2 - Schizophrenia Spectrum and Other Psychotic Disorders"= "#e2c9f2",
-  #                               "Ch3 - Bipolar and Related Disorders" = "#ceedaf", 
-  #                               "Ch4 - Depressive Disorders" = "#9dc8e3"))+
-  theme_void()+
-  theme(legend.position = "none")+
-  geom_node_text(aes(x = x*1.1, y=y*1.1, filter = leaf, label=name), size=5, alpha=1) 
-  
-
-# ---------------
-# why is there an edge from 3 that stops in the middle of the plot?
-vertices[vertices$name == "4",]
-
-graph_data %>%
-  filter(Unique_ID == "3")
-
-graph_data %>%
-  filter(symptom_id_count == 1)
+ggraph(graph, layout = 'hive', axis = DSM5_Chapter) + 
+  geom_edge_arc(aes(colour = weight), alpha = 0.3, show.legend = F) + # 
+  geom_node_point(size = 2, aes(color = DSM5_Chapter)) +
+  theme_graph() +
+  scale_edge_color_gradientn(colours = c('#756f72',  '#dbb75a', '#ab356a')) +
+  scale_color_manual(values = c("Ch2 - Schizophrenia Spectrum and Other Psychotic Disorders" = "#c6a9cc",
+                                "Ch3 - Bipolar and Related Disorders" = "#cee8a9",
+                                "Ch4 - Depressive Disorders" = "#8ebfe8")) +
+  guides(color="none")
 
 # --------------------------------
-edgebundle(mygraph)
+# for disorders, not chapters
+graph_data <- graph_data %>%
+dplyr::filter(Disorder %in% c("Schizophrenia","Bipolar I Disorder", "Bipolar II Disorder" , "Major Depressive Disorder")) 
 
+adj_matrix <- matrix(0, nrow = nrow(graph_data), ncol = nrow(graph_data))
+
+# Find IDs for symptoms that overlap
+IDs3 <- graph_data %>%
+  group_by(Symptom_ID) %>%
+  summarise(n_groups = n_distinct(DSM_Chapter)) %>%
+  filter(n_groups == 3) %>%
+  pull(Symptom_ID) %>%
+  unique()
+
+IDs2 <- graph_data %>%
+  group_by(Symptom_ID) %>%
+  summarise(n_groups = n_distinct(DSM_Chapter)) %>%
+  filter(n_groups == 2) %>%
+  pull(Symptom_ID) %>%
+  unique()
+
+for (i in 1:nrow(graph_data)){
+  if(graph_data$Symptom_ID[i] %in% IDs3){
+    adj_matrix[i,] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 20, 0)
+    adj_matrix[,i] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 20, 0)
+  }else if(graph_data$Symptom_ID[i] %in% IDs2){
+    adj_matrix[i,] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 10, 0)
+    adj_matrix[,i] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 10, 0)
+  }else{
+    adj_matrix[i,] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 1, 0)
+    adj_matrix[,i] <- ifelse(graph_data$Symptom_ID[i] == graph_data$Symptom_ID, 1, 0)
+  }
+}
+
+# Check it keeps nodes with 0 edges
+sapply(1:nrow(adj_matrix), function(i){
+  sum(adj_matrix[i,]) == 0
+})
+
+# Convert to a tidy graph object
+graph <- as_tbl_graph(adj_matrix, directed = FALSE) %>%
+  mutate(DSM5_Chapter = factor(graph_data$DSM_Chapter)) %>%
+  mutate(Disorder = factor(graph_data$Disorder)) %>%
+  mutate(Symptom_ID = graph_data$Symptom_ID) %>%
+  mutate(overlap = ifelse(Symptom_ID %in% IDs, TRUE, FALSE))
+
+png("plots/disorders.png", height = 3000, width = 3000, res = 500)
+ggraph(graph, layout = 'linear', circular = TRUE) + 
+  geom_edge_arc(aes(colour = weight), alpha = 0.6, show.legend = F) + 
+  geom_node_point(size = 2, aes(color = Disorder)) +
+  theme_graph() +
+  scale_edge_color_gradientn(colours = c('#756f72',  '#dbb75a', '#ab356a')) +
+  scale_color_manual(values = c("Schizophrenia" = "#c6a9cc",
+                                "Bipolar I Disorder" = "#cee8a9",
+                                "Bipolar II Disorder" = "#698a63",
+                                "Major Depressive Disorder" = "#8ebfe8")) +
+  guides(color="none")
+dev.off()
 
 
 
